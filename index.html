@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Escanor Indicator</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@900&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--gold:#f5c542;--up:#22e07a;--down:#ff4d5e;--card:rgba(10,10,10,.72);--line:rgba(255,255,255,.14)}
+*{box-sizing:border-box;margin:0}
+html,body{background:#000;color:#fff;font-family:'Rajdhani',system-ui,sans-serif;min-height:100%}
+.bg{position:fixed;inset:0;z-index:-1;display:grid;place-items:center;pointer-events:none;overflow:hidden}
+.bg svg{width:min(140vw,860px);opacity:.2;filter:grayscale(1)}
+.bg b{position:absolute;bottom:2vh;font:900 22vw 'Cinzel Decorative',serif;color:#fff;opacity:.06;letter-spacing:.04em}
+.wrap{max-width:520px;margin:0 auto;padding:16px 14px 28px;padding-top:calc(16px + env(safe-area-inset-top,0px))}
+h1{font:900 40px/1 'Cinzel Decorative',serif;text-align:center;letter-spacing:.08em;text-shadow:0 0 18px rgba(245,197,66,.55),0 0 2px #fff}
+.sub{text-align:center;letter-spacing:.5em;color:var(--gold);font-weight:700;margin:6px 0 16px;font-size:14px}
+.tabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.tab{flex:1 0 auto;padding:9px 14px;border:1px solid var(--line);background:var(--card);color:#fff;border-radius:10px;font:700 15px 'Rajdhani',sans-serif;cursor:pointer;letter-spacing:.04em}
+.tab.on{border-color:var(--gold);color:var(--gold);box-shadow:0 0 12px rgba(245,197,66,.35)}
+.live{display:block;width:100%;margin:12px 0;padding:12px;border:1px solid var(--gold);background:linear-gradient(90deg,#1a1400,#000);color:var(--gold);border-radius:10px;font:700 16px 'Rajdhani',sans-serif;letter-spacing:.12em;cursor:pointer}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px;backdrop-filter:blur(4px)}
+.head{display:flex;justify-content:space-between;align-items:center;padding:2px 4px 8px;font-weight:700;letter-spacing:.06em}
+.legend{font-size:13px;color:#ccc}.legend .u{color:var(--up)}.legend .d{color:var(--down)}
+canvas{width:100%;height:300px;display:block}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.stat small{display:block;color:#bbb;letter-spacing:.1em;font-size:12px;text-transform:uppercase}
+.stat span{font-size:26px;font-weight:700}
+.win{color:var(--up)}.loss{color:var(--down)}.gold{color:var(--gold)}
+.sh{display:flex;justify-content:space-between;align-items:center;margin-top:14px;letter-spacing:.08em}
+.sh small{color:#999;margin-right:8px;letter-spacing:0}
+.rf{background:var(--card);border:1px solid var(--gold);color:var(--gold);border-radius:8px;padding:6px 12px;font:700 14px 'Rajdhani',sans-serif;cursor:pointer}
+.rf i{display:inline-block;font-style:normal}
+.spin{animation:sp .7s linear}
+@keyframes sp{to{transform:rotate(360deg)}}
+.last{margin-top:8px;text-align:center;color:#ccc;font-size:13px}
+.alert{margin:12px 0 0;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card);text-align:center;font-weight:700;letter-spacing:.06em;font-size:18px}
+.alert small{display:block;font-weight:500;font-size:12px;letter-spacing:.04em;color:#ccc;margin-top:3px}
+.alert.idle{color:#aaa;font-size:14px}.alert.err{color:#ffb4bb;border-color:var(--down);font-size:14px}
+.alert.ready{border-style:dashed}.alert.now{animation:pulse 1s infinite}
+.alert.call{color:var(--up);border-color:var(--up)}.alert.put{color:var(--down);border-color:var(--down)}
+.alert.cancel{color:#ccc;border-color:#888}
+@keyframes pulse{50%{box-shadow:0 0 18px currentColor}}
+.note{margin-top:14px;text-align:center;color:#888;font-size:12px}
+</style>
+</head>
+<body>
+<div class="bg"><div id="lion"></div><b>ESCANOR</b></div>
+<div class="wrap">
+  <h1>ESCANOR</h1>
+  <div class="sub">INDICATOR</div>
+  <div class="tabs" id="tabs"></div>
+  <div class="alert idle" id="alert"></div>
+  <button class="live" id="live">OPEN QX BROKER LIVE MARKET &#8599;</button>
+  <div class="card">
+    <div class="head"><span id="mname"></span><span class="legend"><span class="u">&#9650; CALL</span> &nbsp; <span class="d">&#9660; PUT</span></span></div>
+    <canvas id="chart"></canvas>
+  </div>
+  <div class="last" id="last"></div>
+  <div class="sh"><b>STATISTICS</b><span><small id="upd"></small><button class="rf" id="rf"><i id="ri">&#8635;</i> Refresh</button></span></div>
+  <div class="grid" id="stats"></div>
+  <div class="note" id="note"></div>
+</div>
+<script>
+/* ===== SETTINGS (edit these) ===== */
+const CONFIG = {
+  QX_URL: "https://qxbroker.com/en/trade",   // QX Broker live market link
+  API_URL: "/candles",                         // live data from server.py (add ?demo to the page link for demo mode)
+  MARKETS: ["USD/ZAR", "USD/BRL", "EUR/JPY", "CAD/JPY"],
+  VISIBLE: 60                                 // candles shown on screen
+};
+/* The server (server.py) returns, for each market:
+   { candles: [{t,o,h,l,c}, ...] (closed, oldest first), forming: {t,o,h,l,c} | null,
+     pre: true when the forming candle was read at second 45+, server_time: ms }
+   Signals and results are worked out below by the strategy. */
+
+const $ = id => document.getElementById(id);
+const tg = window.Telegram && Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor("#000000"); tg.setBackgroundColor("#000000"); } catch (e) {} }
+
+/* ---- lion face background (black and white) ---- */
+function spikes(n, R, r, rot) {
+  const p = [];
+  for (let k = 0; k < n * 2; k++) {
+    const a = rot + k * Math.PI / n, d = k % 2 ? r : R;
+    p.push((200 + d * Math.cos(a)).toFixed(1) + "," + (200 + d * Math.sin(a)).toFixed(1));
+  }
+  return p.join(" ");
+}
+$("lion").innerHTML = `<svg viewBox="0 0 400 400">
+<polygon points="${spikes(26,198,150,0)}" fill="#fff"/>
+<polygon points="${spikes(22,172,128,.1)}" fill="#000" stroke="#fff" stroke-width="3"/>
+<polygon points="${spikes(18,148,112,.2)}" fill="#fff"/>
+<circle cx="122" cy="116" r="26" fill="#000" stroke="#fff" stroke-width="4"/><circle cx="278" cy="116" r="26" fill="#000" stroke="#fff" stroke-width="4"/>
+<ellipse cx="200" cy="215" rx="82" ry="98" fill="#000" stroke="#fff" stroke-width="4"/>
+<path d="M200 122V172M178 130L186 170M222 130L214 170" stroke="#fff" stroke-width="3" fill="none"/>
+<path d="M136 184L184 200L178 212L140 204Z M264 184L216 200L222 212L260 204Z" fill="#fff"/>
+<path d="M178 238H222L200 266Z" fill="#fff"/>
+<path d="M200 266V288M200 288Q176 310 150 292M200 288Q224 310 250 292" stroke="#fff" stroke-width="4" fill="none"/>
+</svg>`;
+
+/* ---- demo candles (only until your real data is connected) ---- */
+const BASE = {"USD/ZAR":18.2,"USD/BRL":5.4,"EUR/JPY":163,"CAD/JPY":110};
+function rng(s){return function(){s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function demoData(m) {
+  const r = rng([...m].reduce((a, c) => a + c.charCodeAt(0), 7) * 131);
+  let p = BASE[m] || 1, drift = 0; const candles = [], t0 = Date.now() - 300 * 60000;
+  for (let i = 0; i < 300; i++) {
+    if (i % 30 === 0) drift = (r() - .5) * .0006;
+    const o = p, c = o * (1 + drift + (r() - .5) * .0016);
+    candles.push({t: t0 + i * 60000, o, c,
+      h: Math.max(o, c) * (1 + Math.pow(r(), 2) * .0012),
+      l: Math.min(o, c) * (1 - Math.pow(r(), 2) * .0012)});
+    p = c;
+  }
+  return {candles, demo: true};
+}
+const DEMO = /[?&]demo/.test(location.search) || !CONFIG.API_URL;
+async function loadMarket(m) {
+  if (DEMO) return demoData(m);
+  try {
+    const res = await fetch(CONFIG.API_URL + "?market=" + encodeURIComponent(m), {cache: "no-store"});
+    const d = await res.json();
+    return res.ok ? d : {error: d.error || "server error"};
+  } catch (e) { return {error: "no reply from the data server. Open this page from the server.py link (for example http://localhost:8000), not from Netlify or a file."}; }
+}
+
+/* ---- STRATEGY (from your 1-minute candle guide) ----
+   Uses CLOSED candles only. A pattern alone is never enough. Score =
+   pattern (1) + price structure (1) + at support/resistance (1) + EMA 9/21 agrees (1).
+   A signal needs score >= MIN_SCORE. Blocked when: candle is too large (chasing),
+   RSI 14 is overextended in the signal direction, or too soon after the last signal. */
+/*STRATEGY_START*/
+const STRAT = {MIN_SCORE: 3, COOLDOWN: 4, LOOKBACK: 40, BIG_BODY: 3};
+function ema(v, n) { const k = 2 / (n + 1), o = [v[0]]; for (let i = 1; i < v.length; i++) o.push(v[i] * k + o[i - 1] * (1 - k)); return o; }
+function rsi(cs, n) {
+  const o = Array(cs.length).fill(50); let g = 0, l = 0;
+  for (let i = 1; i < cs.length; i++) {
+    const d = cs[i].c - cs[i - 1].c, u = Math.max(d, 0), w = Math.max(-d, 0);
+    if (i <= n) { g += u / n; l += w / n; } else { g = (g * (n - 1) + u) / n; l = (l * (n - 1) + w) / n; }
+    if (i >= n) o[i] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  }
+  return o;
+}
+function atr(cs, n) {
+  const o = []; let a = 0;
+  for (let i = 0; i < cs.length; i++) {
+    const c = cs[i], tr = i ? Math.max(c.h - c.l, Math.abs(c.h - cs[i - 1].c), Math.abs(c.l - cs[i - 1].c)) : c.h - c.l;
+    a = i < n ? (a * i + tr) / (i + 1) : (a * (n - 1) + tr) / n; o.push(a);
+  }
+  return o;
+}
+const body = c => Math.abs(c.c - c.o), span = c => c.h - c.l;
+const upW = c => c.h - Math.max(c.o, c.c), loW = c => Math.min(c.o, c.c) - c.l;
+const isUp = c => c.c > c.o, isDn = c => c.c < c.o;
+
+function levels(cs, i) {   // swing lows = support, swing highs = resistance
+  const sup = [], res = [];
+  for (let k = Math.max(2, i - STRAT.LOOKBACK); k <= i - 3; k++) {
+    const c = cs[k];
+    if ([1, 2].every(d => c.l < cs[k - d].l && c.l < cs[k + d].l)) sup.push(c.l);
+    if ([1, 2].every(d => c.h > cs[k - d].h && c.h > cs[k + d].h)) res.push(c.h);
+  }
+  return {sup, res};
+}
+function structure(cs, i) {   // higher highs + higher lows = up; lower + lower = down; else range
+  const a = cs.slice(i - 7, i + 1), b = cs.slice(i - 15, i - 7);
+  const hi = x => Math.max(...x.map(c => c.h)), lo = x => Math.min(...x.map(c => c.l));
+  if (hi(a) > hi(b) && lo(a) > lo(b)) return "up";
+  if (hi(a) < hi(b) && lo(a) < lo(b)) return "down";
+  return "range";
+}
+function patterns(cs, i, lv, a) {
+  const c = cs[i], p = cs[i - 1], q = cs[i - 2], out = [], R = span(c);
+  const add = (dir, name, atLevel) => out.push({dir, name, atLevel});
+  const fell = p.c < cs[i - 4].c, rose = p.c > cs[i - 4].c, strong = x => body(x) >= .35 * a;
+  if (R > 0 && loW(c) >= .6 * R && upW(c) <= .15 * R && fell) add("CALL", "Hammer");
+  if (R > 0 && upW(c) >= .6 * R && loW(c) <= .15 * R && rose) add("PUT", "Shooting star");
+  if (isDn(p) && isUp(c) && c.o <= p.c && c.c >= p.o && body(c) > body(p)) add("CALL", "Bullish engulfing");
+  if (isUp(p) && isDn(c) && c.o >= p.c && c.c <= p.o && body(c) > body(p)) add("PUT", "Bearish engulfing");
+  if ([q, p, c].every(isUp) && [q, p, c].every(strong) && p.c > q.c && c.c > p.c && p.o >= q.o && p.o <= q.c && c.o >= p.o && c.o <= p.c && cs[i - 3].c <= cs[i - 5].c) add("CALL", "Three soldiers");
+  if ([q, p, c].every(isDn) && [q, p, c].every(strong) && p.c < q.c && c.c < p.c && p.o <= q.o && p.o >= q.c && c.o <= p.o && c.o >= p.c && cs[i - 3].c >= cs[i - 5].c) add("PUT", "Three crows");
+  if (p.h <= q.h && p.l >= q.l) {   // inside bar: only a confirmed break counts
+    if (c.c > q.h) add("CALL", "Inside-bar break");
+    if (c.c < q.l) add("PUT", "Inside-bar break");
+  }
+  lv.sup.forEach(L => {
+    if (c.l <= L && Math.min(c.o, c.c) > L) add("CALL", "Support rejection", true);
+    else if (p.c < L && c.c > L) add("CALL", "False breakdown", true);
+  });
+  lv.res.forEach(L => {
+    if (c.h >= L && Math.max(c.o, c.c) < L) add("PUT", "Resistance rejection", true);
+    else if (p.c > L && c.c < L) add("PUT", "False breakout", true);
+  });
+  return out;   // Doji alone is neutral, so it never makes a signal
+}
+function findSignals(cs) {
+  const cl = cs.map(c => c.c), E9 = ema(cl, 9), E21 = ema(cl, 21), R = rsi(cs, 14), A = atr(cs, 14);
+  const out = []; let last = -99;
+  for (let i = 30; i < cs.length; i++) {
+    if (i - last < STRAT.COOLDOWN) continue;
+    const c = cs[i];
+    if (body(c) > STRAT.BIG_BODY * A[i]) continue;   // do not chase a large candle
+    const lv = levels(cs, i), tol = .5 * A[i], tr = structure(cs, i);
+    let best = null;
+    patterns(cs, i, lv, A[i]).forEach(pt => {
+      const call = pt.dir === "CALL";
+      if (call ? R[i] > 70 : R[i] < 30) return;   // overextended: would be chasing
+      const near = !!pt.atLevel || (call ? lv.sup.some(L => Math.abs(c.l - L) <= tol) : lv.res.some(L => Math.abs(c.h - L) <= tol));
+      const struct = tr === (call ? "up" : "down");
+      const emaOk = call ? E9[i] > E21[i] : E9[i] < E21[i];
+      const score = 1 + near + struct + emaOk;
+      if (score >= STRAT.MIN_SCORE && (!best || score > best.score))
+        best = {i, dir: pt.dir, score, why: [pt.name, near && (call ? "At support" : "At resistance"), struct && (call ? "Up-trend" : "Down-trend"), emaOk && "EMA 9/21 agree"].filter(Boolean)};
+    });
+    if (best) { out.push(best); last = i; }
+  }
+  return out;
+}
+/* Result: entry at the signal candle's close, 1-minute expiry = next candle's close.
+   Lost? MTG1 = same direction on the next candle, then MTG2. Tie counts as a loss. */
+function evaluate(cs, sigs) {
+  return sigs.map(s => {
+    if (s.result) return s;
+    const dir = s.dir === "CALL" ? 1 : -1;
+    for (let step = 0; step <= 2; step++) {
+      const a = s.i + step, b = a + 1;
+      if (b >= cs.length) return {...s, result: "pending", mtg: 0};
+      if ((cs[b].c - cs[a].c) * dir > 0) return {...s, result: "win", mtg: step};
+    }
+    return {...s, result: "loss", mtg: 2};
+  });
+}
+/*STRATEGY_END*/
+
+/* ---- stats ---- */
+function renderStats(sig) {
+  const total = sig.length, wins = sig.filter(s => s.result === "win"), losses = total - wins.length;
+  const non = wins.filter(s => !s.mtg).length, mtg = wins.length - non;
+  const pct = n => total ? (n / total * 100).toFixed(1) + "%" : "-";
+  const ratio = losses ? (wins.length / losses).toFixed(2) + " : 1" : (wins.length ? wins.length + " : 0" : "-");
+  const calls = sig.filter(s => s.dir === "CALL").length;
+  const items = [
+    ["Total Signals", total, ""], ["Accuracy", pct(wins.length), "gold"],
+    ["Win", wins.length, "win"], ["Loss", losses, "loss"],
+    ["Non-MTG Win", non, "win"], ["MTG Win", mtg, "win"],
+    ["Non-MTG Accuracy", pct(non), "gold"], ["Win Ratio", ratio, "gold"],
+    ["Call Signals", calls, "win"], ["Put Signals", total - calls, "loss"]
+  ];
+  $("stats").innerHTML = items.map(([l, v, c]) => `<div class="stat"><small>${l}</small><span class="${c}">${v}</span></div>`).join("");
+}
+
+/* ---- chart: candles with CALL above the candle, PUT below the candle ---- */
+const state = {market: CONFIG.MARKETS[0], candles: [], forming: null, signals: [], pre: null, lastPre: null, offset: 0, demo: false, stale: false, err: ""};
+function tri(ctx, x, y, size, up, color) {
+  ctx.fillStyle = color; ctx.beginPath();
+  if (up) { ctx.moveTo(x, y - size); ctx.lineTo(x - size * .8, y); ctx.lineTo(x + size * .8, y); }
+  else    { ctx.moveTo(x, y + size); ctx.lineTo(x - size * .8, y); ctx.lineTo(x + size * .8, y); }
+  ctx.closePath(); ctx.fill();
+}
+function draw() {
+  const cv = $("chart"), ctx = cv.getContext("2d"), dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const cs = state.forming ? [...state.candles, state.forming] : state.candles; if (!cs.length) return;
+  const start = Math.max(0, cs.length - CONFIG.VISIBLE), vis = cs.slice(start);
+  const padL = 6, padR = 54, padT = 30, padB = 30;
+  let hi = Math.max(...vis.map(c => c.h)), lo = Math.min(...vis.map(c => c.l));
+  const pad = (hi - lo) * .06; hi += pad; lo -= pad;
+  const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
+  const cw = (W - padL - padR) / vis.length, x = k => padL + cw * k + cw / 2;
+  const dec = hi < 10 ? 4 : 3;
+  ctx.font = "11px Rajdhani,sans-serif"; ctx.textBaseline = "middle";
+  for (let g = 0; g <= 5; g++) {
+    const v = lo + (hi - lo) * g / 5, yy = y(v);
+    ctx.strokeStyle = "rgba(255,255,255,.08)"; ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy); ctx.stroke();
+    ctx.fillStyle = "#999"; ctx.fillText(v.toFixed(dec), W - padR + 4, yy);
+  }
+  vis.forEach((c, k) => {
+    const col = c.c >= c.o ? "#22e07a" : "#ff4d5e", cx = x(k);
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.globalAlpha = state.forming && k === vis.length - 1 ? .5 : 1;
+    ctx.beginPath(); ctx.moveTo(cx, y(c.h)); ctx.lineTo(cx, y(c.l)); ctx.stroke();
+    const top = y(Math.max(c.o, c.c)), h = Math.max(1, Math.abs(y(c.o) - y(c.c)));
+    ctx.fillRect(cx - cw * .35, top, cw * .7, h); ctx.globalAlpha = 1;
+  });
+  const size = Math.max(5, Math.min(9, cw * 1.1));
+  state.signals.forEach(s => {
+    if (s.i < start || s.i >= cs.length) return;
+    const k = s.i - start, c = vis[k];
+    if (s.dir === "CALL") tri(ctx, x(k), y(c.h) - 5, size, true, "#22e07a");    // CALL: above the candle
+    else tri(ctx, x(k), y(c.l) + 5, size, false, "#ff4d5e");                    // PUT: below the candle
+  });
+  if (state.pre) {   // early signal on the still-forming candle (faded arrow)
+    const k = vis.length - 1, c = vis[k]; ctx.globalAlpha = .55;
+    if (state.pre.dir === "CALL") tri(ctx, x(k), y(c.h) - 5, size, true, "#22e07a"); else tri(ctx, x(k), y(c.l) + 5, size, false, "#ff4d5e");
+    ctx.globalAlpha = 1;
+  }
+}
+
+/* ---- UI wiring ---- */
+const clock = d => d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+const now = () => Date.now() + state.offset;   // uses the server clock, so a wrong phone clock does not matter
+
+async function poll() {
+  const m = state.market, d = await loadMarket(m);
+  if (m !== state.market) return;               // market changed while loading
+  state.demo = !!d.demo; state.err = d.error || ""; state.pre = null;
+  if (!d.error) {
+    state.candles = d.candles || []; state.forming = d.pre ? (d.forming || null) : null;
+    if (d.server_time) state.offset = d.server_time - Date.now();
+    const last = state.candles[state.candles.length - 1];
+    state.stale = !state.demo && (!last || now() - (last.t + 60000) > 180000);   // market closed or feed stopped
+    state.signals = evaluate(state.candles, findSignals(state.candles));
+    if (state.forming && !state.stale) {        // 15-second early signal: run the strategy on the forming candle
+      const arr = [...state.candles, state.forming], sg = findSignals(arr), P = sg[sg.length - 1];
+      if (P && P.i === arr.length - 1) state.pre = P;
+    }
+  }
+  $("note").textContent = state.demo ? "DEMO MODE: simulated candles. These signals are not live, do not trade on them." : "";
+  draw(); tick();
+  const L = state.signals[state.signals.length - 1];
+  $("last").innerHTML = L ? `Latest: <b class="${L.dir === "CALL" ? "win" : "loss"}">${L.dir}</b> &middot; ${(L.why || []).join(" &middot; ")} &middot; ${new Date(state.candles[L.i].t).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}` : "No signal yet";
+}
+
+function tick() {   // the indicator banner
+  const n = now(), sec = Math.floor(n / 1000) % 60, left = 60 - sec, minute = Math.floor(n / 60000) * 60000;
+  const last = state.candles[state.candles.length - 1], el = $("alert");
+  let cls = "idle", html = `Scanning ${state.market} &middot; next candle in ${left}s`;
+  if (state.err) { cls = "err"; html = "Live data unavailable: " + state.err; }
+  else if (state.demo) { cls = "err"; html = "DEMO MODE &middot; not live data"; }
+  else if (state.stale) { cls = "err"; html = "Market closed or data not updating &middot; signals paused"; }
+  else if (state.pre && sec >= 45) {            // 15 seconds before the trade
+    const P = state.pre; state.lastPre = {t: minute, dir: P.dir};
+    cls = "ready " + P.dir.toLowerCase();
+    html = `GET READY &middot; <b>${P.dir}</b> ${P.dir === "CALL" ? "&#9650;" : "&#9660;"} in ${left}s<small>${P.why.join(" &middot; ")}</small>`;
+  } else if (last && sec < 12 && last.t === minute - 60000) {   // candle just closed: confirm or cancel
+    const L = state.signals[state.signals.length - 1];
+    if (L && L.i === state.candles.length - 1) {
+      cls = "now " + L.dir.toLowerCase();
+      html = `ENTER NOW &middot; <b>${L.dir}</b> ${L.dir === "CALL" ? "&#9650;" : "&#9660;"} &middot; 1 min expiry<small>${(L.why || []).join(" &middot; ")}</small>`;
+    } else if (state.lastPre && state.lastPre.t === last.t) { cls = "cancel"; html = "Signal cancelled &middot; the candle closed differently"; }
+  }
+  el.className = "alert " + cls; el.innerHTML = html;
+}
+
+function showStats() {   // stats change only here, not while the chart updates
+  renderStats(state.signals.filter(s => s.result !== "pending"));
+  $("upd").textContent = "Updated " + clock(new Date());
+}
+async function select(m) {
+  state.market = m; state.candles = []; state.forming = null; state.signals = []; state.pre = null; state.lastPre = null;
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.m === m));
+  $("mname").textContent = m;
+  await poll(); showStats();
+}
+async function refreshStats() {   // the Refresh button: refresh the stats
+  const i = $("ri"); i.classList.remove("spin"); void i.offsetWidth; i.classList.add("spin");
+  await poll(); showStats();
+}
+
+$("tabs").innerHTML = CONFIG.MARKETS.map(m => `<button class="tab" data-m="${m}">${m}</button>`).join("");
+$("tabs").onclick = e => { if (e.target.dataset.m) select(e.target.dataset.m); };
+$("live").onclick = () => tg ? tg.openLink(CONFIG.QX_URL) : window.open(CONFIG.QX_URL, "_blank");
+$("rf").onclick = refreshStats;
+window.addEventListener("resize", draw);
+select(state.market);
+setInterval(poll, 3000);
+setInterval(tick, 500);
+</script>
+</body>
+</html>
